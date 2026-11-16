@@ -1,0 +1,109 @@
+"""Unit tests for the answer checks and the scoring. No model or API key needed.
+
+Run from the repo root:  python -m pytest assistant/tests -q
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from checks import check_answer, is_grounded, parse_json  # noqa: E402
+from scoring import is_correct  # noqa: E402
+
+RETRIEVED = [
+    {"id": 3, "years": [1912, 1913], "text": "In 1912 John Smith was elected mayor of Richmond."},
+    {"id": 7, "years": [1850], "text": "In 1850 Thomas Brown was mayor of Richmond."},
+]
+QUESTION = "Who was the mayor of Richmond in 1912?"
+
+
+def answer(text, cited, confidence="high"):
+    return f'{{"answer": "{text}", "cited_ids": {cited}, "confidence": "{confidence}"}}'
+
+
+def test_good_answer_passes():
+    _, failures = check_answer(QUESTION, answer("John Smith", [3]), RETRIEVED)
+    assert failures == []
+
+
+def test_json_inside_code_fence_is_parsed():
+    data, error = parse_json('```json\n{"answer": "x", "cited_ids": [], "confidence": "low"}\n```')
+    assert error is None and data["answer"] == "x"
+
+
+def test_not_json_fails_format():
+    _, failures = check_answer(QUESTION, "John Smith was mayor.", RETRIEVED)
+    assert failures[0].startswith("FORMAT")
+
+
+def test_missing_field_fails_format():
+    _, failures = check_answer(QUESTION, '{"answer": "John Smith", "cited_ids": [3]}', RETRIEVED)
+    assert failures[0].startswith("FORMAT")
+
+
+def test_invented_source_is_caught():
+    _, failures = check_answer(QUESTION, answer("John Smith", [99]), RETRIEVED)
+    assert any(f.startswith("INVENTED_SOURCE") for f in failures)
+
+
+def test_wrong_year_source_is_caught():
+    _, failures = check_answer(QUESTION, answer("Thomas Brown", [7]), RETRIEVED)
+    assert any(f.startswith("WRONG_TIME") for f in failures)
+
+
+def test_ungrounded_answer_is_caught():
+    _, failures = check_answer(QUESTION, answer("George Washington", [3]), RETRIEVED)
+    assert any(f.startswith("NOT_GROUNDED") for f in failures)
+
+
+def test_answer_without_citation_is_caught():
+    _, failures = check_answer(QUESTION, answer("John Smith", []), RETRIEVED)
+    assert any(f.startswith("NO_CITATION") for f in failures)
+
+
+def test_not_found_is_allowed():
+    _, failures = check_answer(QUESTION, answer("NOT_FOUND", []), RETRIEVED)
+    assert failures == []
+
+
+def test_bad_confidence_value_fails():
+    _, failures = check_answer(QUESTION, answer("John Smith", [3], "very sure"), RETRIEVED)
+    assert any(f.startswith("FORMAT") for f in failures)
+
+
+def test_grounding_ignores_case_and_stopwords():
+    assert is_grounded("The Mayor JOHN SMITH", RETRIEVED[0]["text"])
+
+
+def test_is_correct_loose_match():
+    assert is_correct("John Smith", "john smith")
+    assert is_correct("Mayor John Smith of Richmond", "John Smith")
+    assert not is_correct("NOT_FOUND", "John Smith")
+    assert not is_correct("Thomas Brown", "John Smith")
+
+
+def test_number_formats_count_as_grounded():
+    retrieved = [{"id": 1, "years": [1818, 1819], "text": "There were 21,300 christenings and ONE boat."}]
+    q = "How many christenings were there between 1818 and 1819?"
+    assert check_answer(q, answer("21300", [1]), retrieved)[1] == []
+    assert check_answer(q, answer("1", [1]), retrieved)[1] == []
+
+
+def test_messy_not_found_is_treated_as_not_found():
+    data, failures = check_answer(QUESTION, answer("... NOT_FOUND ...", []), RETRIEVED)
+    assert failures == [] and data["answer"] == "NOT_FOUND"
+
+
+def test_is_correct_handles_numbers():
+    assert is_correct("21300", "21,300")
+    assert is_correct("1", "ONE")
+    assert not is_correct("... NOT_FOUND ...", "English")
+
+
+def test_numeric_answer_from_model_is_accepted():
+    retrieved = [{"id": 1, "years": [1860], "text": "Three boats leave Napoleon in 1860."}]
+    raw = '{"answer": 3, "cited_ids": [1], "confidence": "high"}'
+    data, failures = check_answer("How many boats leave Napoleon in 1860?", raw, retrieved)
+    assert failures == [] and data["answer"] == "3"
+    assert is_correct(3, "THREE")
