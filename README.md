@@ -167,6 +167,31 @@ Raw JSON files used to produce these tables are included in `outputs/`:
 - `outputs/mrag_eval_results_fast.json` (CAQA+MRAG implementation)
 - `outputs/squad_filtered_results.json`
 
+  ## LLM answer step with output checks (new)
+
+On top of the time-aware retriever, I added an LLM answer step: the model answers only from
+retrieved passages in strict JSON with citations, and automatic checks run before any answer
+is shown (valid JSON, cites only retrieved passages, date matches the question, answer is
+grounded in the cited text). Failed answers are retried once, then flagged for human review.
+Code: [`assistant/`](assistant/) · 16 unit tests · every model call logged.
+
+**Results on 20 year-explicit ChroniclingAmericaQA questions** (2,000-passage index, local qwen2.5:7b):
+
+| Setup | Right passage in top 3 | Correct | Said "not found" | Flagged by check | Wrong answer shown to a person |
+|---|---|---|---|---|---|
+| A. Baseline retrieval + LLM | 70% | 40% | 40% | — | 20% |
+| B. Time-aware retrieval + LLM | 90% | 45% | 35% | — | 20% |
+| C. Time-aware + LLM + checks | 90% | 45% | 35% | 5% | 15% |
+
+**What I changed after measuring:** in the first run, 9 of 11 "not found" answers had the right
+passage retrieved. The dates in the questions are newspaper publication dates, which usually
+aren't in the passage text. Passing each passage's publication date as metadata raised correct
+answers from **30% to 45%** and cut "not found" from **55% to 35%** (setup C).
+
+Notes: small sample (20 questions); "correct" uses loose matching against the dataset's answer
+key, and a hand-check found some keys are wrong. Built for the Claude API; run here on a free
+local model, and switching is one environment variable.
+
 ## Reproducibility 
 
 If you only want to run T5 test set (in-domain), ChroniclingQA (OOD), and SQuAD (temporal)+MRAG evaluations, the minimal sequence is:
