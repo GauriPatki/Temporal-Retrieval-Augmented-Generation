@@ -183,7 +183,7 @@ Code: [`assistant/`](assistant/) · 16 unit tests · every model call logged.
 | B. Time-aware retrieval + LLM | 90% | 45% | 35% | — | 20% |
 | C. Time-aware + LLM + checks | 90% | 45% | 35% | 5% | 15% |
 
-**What I changed after measuring:** in the first run, 9 of 11 "not found" answers had the right
+**What changed after measuring:** in the first run, 9 of 11 "not found" answers had the right
 passage retrieved. The dates in the questions are newspaper publication dates, which usually
 aren't in the passage text. Passing each passage's publication date as metadata raised correct
 answers from **30% to 45%** and cut "not found" from **55% to 35%** (setup C).
